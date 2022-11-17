@@ -11,22 +11,62 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <memory>
 
-/* 16: size of epoll_event struct + padding memory
- * 1024: maximum of file descriptor
- * */
+#define SENDBUF_SIZE 1024
 
-#define MAXFDS 16 * 1024
+typedef enum {
+    INITIAL_ACK = 0,
+    WAIT_FOR_MSG,
+    IN_MSG
+} ProcessingState; //connection state
 
-class Server
-{
+typedef struct {
+  bool want_read;
+  bool want_write;
+} fd_status_t;
+
+const fd_status_t fd_status_R = {.want_read = true, .want_write = false};
+const fd_status_t fd_status_W = {.want_read = false, .want_write = true};
+const fd_status_t fd_status_RW = {.want_read = true, .want_write = true};
+const fd_status_t fd_status_NORW = {.want_read = false, .want_write = false};
+
+typedef struct {
+    ProcessingState state;
+    uint8_t sendbuf[SENDBUF_SIZE];
+    int sendbuf_end;
+    int sendptr;
+} peer_state_t; //client state
+
+class Action {
     public:
-        Server(int portnum);
-        ~Server();
+        Action() { 
+            return; 
+        }
+        ~Action() {
+            return;
+        }
+};
 
-        void run();
-    private:
-        int m_listener_socketfd;
-        int m_epoll_fd; 
-        struct epoll_event* p_events;
+class Server {
+
+public:
+    Server(int portnum);
+    ~Server(); 
+    void run();
+
+private:
+    const int MAXFDS = 10000;
+    int m_listener_socketfd; 
+    int m_epoll_fd; 
+    struct epoll_event* p_events;
+    std::unique_ptr<peer_state_t[]> global_state;
+
+private:
+    //Change name
+    fd_status_t on_peer_connected(int sockfd, const struct sockaddr_in* peer_addr,
+            socklen_t peer_addr_len);
+    fd_status_t on_peer_ready_recv(int sockfd);
+    fd_status_t on_peer_ready_send(int sockfd);
+
 };
