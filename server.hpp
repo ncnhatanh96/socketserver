@@ -12,61 +12,61 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <memory>
+#include <iostream>
+#include <cstring>
 
 #define SENDBUF_SIZE 1024
-
-typedef enum {
-    INITIAL_ACK = 0,
-    WAIT_FOR_MSG,
-    IN_MSG
-} ProcessingState; //connection state
-
-typedef struct {
-  bool want_read;
-  bool want_write;
-} fd_status_t;
-
-const fd_status_t fd_status_R = {.want_read = true, .want_write = false};
-const fd_status_t fd_status_W = {.want_read = false, .want_write = true};
-const fd_status_t fd_status_RW = {.want_read = true, .want_write = true};
-const fd_status_t fd_status_NORW = {.want_read = false, .want_write = false};
-
-typedef struct {
-    ProcessingState state;
-    uint8_t sendbuf[SENDBUF_SIZE];
-    int sendbuf_end;
-    int sendptr;
-} peer_state_t; //client state
+#define MAXFDS 10000
 
 class Action {
-    public:
-        Action() { 
-            return; 
-        }
-        ~Action() {
-            return;
-        }
+public:
+    Action() = default;
+    ~Action() = default;
+
+    enum IOEvent_Type: int {
+        IO_EVENT_R = 1,
+        IO_EVENT_W,
+        IO_EVENT_RW,
+        IO_EVENT_NO_RW
+    };
+
+    void setIOEventType(IOEvent_Type ioEvent) {
+        ioEventType = ioEvent;
+        return;
+    }
+
+    IOEvent_Type getIOEventType() {
+        return ioEventType;
+    }
+
+    void setFd(int sockfd) {
+        fd = sockfd;
+    }
+
+    int getFd() {
+        return fd;
+    }
+
+private:
+    IOEvent_Type ioEventType = IO_EVENT_R;
+    int fd;
 };
 
 class Server {
-
 public:
     Server(int portnum);
-    ~Server(); 
+    ~Server();
     void run();
 
 private:
-    const int MAXFDS = 10000;
-    int m_listener_socketfd; 
-    int m_epoll_fd; 
-    struct epoll_event* p_events;
-    std::unique_ptr<peer_state_t[]> global_state;
+    //const int MAXFDS = 10000;
+    int m_listener_socketfd;
+    int m_epoll_fd;
+    std::unique_ptr<epoll_event[]> m_Events;
+    std::unique_ptr<Action[]> m_Actions;
 
 private:
-    //Change name
-    fd_status_t on_peer_connected(int sockfd, const struct sockaddr_in* peer_addr,
-            socklen_t peer_addr_len);
-    fd_status_t on_peer_ready_recv(int sockfd);
-    fd_status_t on_peer_ready_send(int sockfd);
-
+    void newConnection();
+    void waitEvents();
+    void setIOEvent(Action* action, int operation);
 };

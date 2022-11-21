@@ -15,198 +15,162 @@ Server::Server(int portnum)
     }
 
     struct epoll_event accept_event;
-    accept_event.data.fd = m_listener_socketfd;
+    accept_event.data.ptr = this;
     accept_event.events = EPOLLIN;
+
     if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, m_listener_socketfd, &accept_event) < 0) {
         perror_die("epoll_ctl: EPOLL_CTL_ADD");
     }
 
-    p_events = new epoll_event[MAXFDS];
-    if (!p_events) {
+    m_Events = std::unique_ptr<epoll_event[]>(new (std::nothrow) epoll_event[MAXFDS]);
+    if (!m_Events) {
         perror_die("Unable to allocate memory for epoll_events");
     }
 
-    global_state = std::unique_ptr<peer_state_t[]>(new (std::nothrow) peer_state_t[MAXFDS]);
-    if (!global_state) {
-        perror_die("Unable to allocate memory for peer_state_t");
+    m_Actions= std::unique_ptr<Action[]>(new (std::nothrow) Action[MAXFDS]);
+    if (!m_Events) {
+        perror_die("Unable to allocate memory for epoll_events");
     }
 }
 
 Server::~Server()
 {
-    delete p_events;
-    delete global_state.get();
     return;
 }
 
+void Server::setIOEvent(Action* action, int operation) {
+
+    std::cout << "SetIOEvent" << "\n";
+    Action* actions = m_Actions.get();
+
+    struct epoll_event event;
+    std::memset(&event, 0, sizeof(struct epoll_event));
+    event.data.ptr = action;
+
+    switch(action->getIOEventType()) {
+
+        case Action::IO_EVENT_R:
+            event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;
+            break;
+
+        case Action::IO_EVENT_W:
+            event.events = EPOLLOUT | EPOLLET | EPOLLONESHOT;
+            break;
+
+        default:
+            perror_die("Unknown action");
+    }
+
+    auto res = epoll_ctl(m_epoll_fd, operation, action->getFd(), &event);
+    if (-1 == res) {
+        perror_die("epoll_ctl error");
+    }
+    return;
+}
+void Server::newConnection() {
+
+    std::cout << "Initializing new connection" << "\n";
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+
+    int newsockfd = accept(m_listener_socketfd, (struct sockaddr*)& client_addr,
+                            &client_addr_len);
+
+    if (newsockfd < 0) {
+        if (EAGAIN == errno || EWOULDBLOCK == errno) {
+            std::cout << "Accept returned EAGAIN or EWOULDBLOCK" << "\n";
+        } else {
+            perror_die("Accept()");
+        }
+    }
+    make_socket_non_blocking(newsockfd);
+    if(newsockfd >= MAXFDS)  {
+        perror_die("sockfd greater than MAXFDS");
+    }
+    m_Actions[newsockfd].setFd(newsockfd);
+    setIOEvent(&m_Actions[newsockfd], EPOLL_CTL_ADD);
+}
+
+void read(Action* action) {
+
+    if (nullptr == action) {
+        std::cout << "NULL Ptr" << "\n";
+    }
+
+    uint8_t buf[1024];
+    auto nbytes = recv(action->getFd(), buf, sizeof(buf), 0);
+    if (0 == nbytes) {
+        std::cout << "Close sockfd" << "\n";
+    }
+
+    std::cout << "Received message: " << buf << "\n";
+    action->setIOEventType(Action::IOEvent_Type::IO_EVENT_W);
+    return;
+}
+
+void write(Action* action) {
+
+    std::string buff("Default message");
+    auto nbytes = send(action->getFd(), buff.c_str(), 15, 0);
+
+    if(-1 == nbytes) {
+        std::cout << "Error sending message" << "\n";
+    } else if (nbytes < 15) {
+        std::cout << "Keep sending message" << "\n";
+    }
+    action->setIOEventType(Action::IOEvent_Type::IO_EVENT_R);
+    return;
+}
+
+void Server::waitEvents() {
+
+    struct epoll_event* Events = (struct epoll_event*)m_Events.get();
+    auto eventsCount = epoll_wait(m_epoll_fd, Events, MAXFDS, -1);
+
+    if((eventsCount < 0 ) && errno != EINTR) {
+        perror_die("epoll_wait error");
+    }
+    std::cout << "eventsCount : " << eventsCount << std::endl;
+    for(int i = 0; i < eventsCount; i++) {
+
+        if (Events[i].data.ptr == this) {
+            newConnection();
+            continue;
+        }
+
+        void* dataPtr = Events[i].data.ptr;
+        Action* action = (Action*) dataPtr;
+
+        switch(action->getIOEventType()) {
+
+            case Action::IOEvent_Type::IO_EVENT_R:
+                std::cout << "Reading..." << "\n";
+                read(action);
+                setIOEvent(action, EPOLL_CTL_MOD);
+                break;
+
+            case Action::IOEvent_Type::IO_EVENT_W:
+                std::cout << "Writing..." << "\n";
+                write(action);
+                setIOEvent(action, EPOLL_CTL_MOD);
+                break;
+
+            case Action::IOEvent_Type::IO_EVENT_NO_RW:
+                close(action->getFd());
+                setIOEvent(action, EPOLL_CTL_DEL);
+                break;
+
+            default:
+                perror_die("Error handling fd");
+                break;
+        }
+    }
+    return;
+}
 void Server::run()
 {
-    while(true)
-    {
-                std::cout << "Line: " <<  __LINE__ << "\n";
-        int nready = epoll_wait(m_epoll_fd, p_events, MAXFDS, -1);
-                std::cout << "Line: " <<  __LINE__ << "\n";
-        for (int i = 0; i < nready; i++) {
-                std::cout << "Line: " <<  __LINE__ << "\n";
-            if (p_events[i].events & EPOLLERR) {
-
-                perror_die("epoll_wait returned EPOLLERR");
-            }
-
-            if (m_listener_socketfd == p_events[i].data.fd) {
-
-                std::cout << "Line: " <<  __LINE__ << "\n";
-                struct sockaddr_in peer_addr;
-                socklen_t peer_addr_len = sizeof(peer_addr);
-
-                int new_sockfd = accept(m_listener_socketfd, (struct sockaddr*) &peer_addr,
-                                        &peer_addr_len);
-                if (new_sockfd < 0) {
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        std::cout << "Accept returned EAGAIN | EWOULDBLOCK" << "\n";
-                    } else {
-                        //check
-                        perror_die("accept");
-                    }
-                } else {
-                    /*PUT TO HANDLER CLASS*/
-                std::cout << "Line: " <<  __LINE__ << "\n";
-                    make_socket_non_blocking(new_sockfd);
-                    if (new_sockfd >= MAXFDS) {
-                        die("socket fd (%d) >= MAXFDS (%d)", new_sockfd, MAXFDS);
-                    }
-
-                    //handle new client connection
-                    fd_status_t status =
-                        on_peer_connected(new_sockfd, &peer_addr, peer_addr_len);
-                    struct epoll_event event = {0};
-                    event.data.fd = new_sockfd;
-
-                    if (status.want_read) {
-                        event.events |= EPOLLIN;
-                    }
-
-                    if (status.want_write) {
-                        event.events |= EPOLLOUT;
-                    }
-
-                    if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, new_sockfd, &event) < 0) {
-                        perror_die("epoll_ctl EPOLL_CTL_ADD");
-                    }
-                }
-            } else {
-                /*IO_READ_HANDLER - RECEIVE*/
-                std::cout << "Line: " <<  __LINE__ << "\n";
-                if (p_events[i].events & EPOLLIN) {
-                    std::cout << "Line: " <<  __LINE__ << "\n";
-                    int fd = p_events[i].data.fd;
-                    fd_status_t status = on_peer_ready_recv(fd);
-                    struct epoll_event event = {0};
-                    event.data.fd = fd;
-
-                    if (status.want_read) {
-                        event.events |= EPOLLIN;
-                    }
-
-                    if (status.want_write) {
-                        event.events |= EPOLLOUT;
-                    }
-
-                    if (0 == event.events) {
-                        printf("socket %d closing\n", fd);
-                        if (epoll_ctl(m_epoll_fd, EPOLL_CTL_DEL, fd, NULL) < 0) {
-                            perror_die("epoll_ctl EPOLL_CTL_ADD");
-                        }
-                        close(fd);
-                    } else if (epoll_ctl(m_epoll_fd, EPOLL_CTL_MOD, fd, &event) < 0) {
-                        perror_die("epoll_ctl EPOLL_CTL_MOD");
-                    }
-                } else if (p_events[i].events & EPOLLOUT) {
-                    /*IO_WRITE_HANDLER - */
-                    int fd = p_events[i].data.fd;
-                    fd_status_t status = on_peer_ready_send(fd);
-                    struct epoll_event event = {0};
-                    event.data.fd = fd;
-
-                    /*Wrap to handler or rcoutine get action*/
-                    if (status.want_read) {
-                        event.events |= EPOLLIN;
-                    }
-
-                    if (status.want_write) {
-                        event.events |= EPOLLOUT;
-                    }
-
-                    /*Wrap close socket*/
-                    if (0 == event.events) {
-                        printf("socket %d closing\n", fd);
-                        if (epoll_ctl(m_epoll_fd, EPOLL_CTL_DEL, fd, NULL) < 0) {
-                            perror_die("epoll_ctl EPOLL_CTL_DEL");
-                        }
-                        close(fd);
-                    } else if (epoll_ctl(m_epoll_fd, EPOLL_CTL_MOD, fd, &event) < 0) {
-                        perror_die("epoll_ctl EPOLL_CTL_MOD");
-                    }
-                }
-            }
-        }
+    while(true) {
+        waitEvents();
     }
     return;
-}
-
-
-
-/*Write Handler*/
-fd_status_t Server::on_peer_connected(int sockfd, const struct sockaddr_in* peer_addr,
-                                socklen_t peer_addr_len) {
-    assert(sockfd < MAXFDS);
-    report_peer_connected(peer_addr, peer_addr_len);
-
-    //Intialize state to send back
-    peer_state_t* peerstate = &global_state.get()[sockfd];
-    peerstate->state = INITIAL_ACK;
-
-    return fd_status_R;
-}
-
-fd_status_t Server::on_peer_ready_recv(int sockfd) {
-    assert(sockfd < MAXFDS);
-    peer_state_t* peerstate = &global_state.get()[sockfd];
-
-    /*GET_BUFFER - Need to parse request from client within this*/
-    uint8_t buf[1024];
-
-    int nbytes = recv(sockfd, buf, sizeof(buf), 0);
-    if (0 == nbytes) {
-        return fd_status_NORW;
-    } else if (nbytes < 0) {
-        if (EAGAIN == errno || errno == EWOULDBLOCK) {
-            return fd_status_R;
-        } else {
-        perror_die("recv");
-        }
-    }
-    std::cout << "Buf: " << buf << "\n";
-
-    return (fd_status_t) {
-                .want_read = false,
-                .want_write = true,
-            };
-}
-
-fd_status_t Server::on_peer_ready_send(int sockfd) {
-    return fd_status_R;
-
-    assert(sockfd < MAXFDS);
-    peer_state_t* peerstate = &global_state.get()[sockfd];
-
-    std::memset(&peerstate->sendbuf, SENDBUF_SIZE);
-    int nsent = send(sockfd, &peerstate->sendbuf, sendlen, 0);
-    if (nsent == -1) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-          return fd_status_W;
-        } else {
-          perror_die("send");
-        }
-    }
 }
