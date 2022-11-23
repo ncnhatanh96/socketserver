@@ -6,18 +6,25 @@
 #include "util.hpp"
 
 
-class db {
+class Db {
     private:
         std::string server;
         std::string user;
         std::string password;
         std::string database;
 
-    public:
-        db(std::string server, std::string user, std::string password, std::string database);
-        ~db();
+    private:
+        MYSQL* connect();
+        void close(MYSQL* conn);
+        MYSQL_RES* query(std::string queries);
+        void dumpSQLQuery(MYSQL_RES* res);
 
-        std::shared_ptr<MYSQL> connect();
+    public:
+
+        Db(const std::string& server, const std::string& user,
+            const std::string& password, const std::string& database);
+        ~Db();
+
         void getCategory(std::string category);
         void getCategory(int id);
 

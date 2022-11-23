@@ -14,7 +14,7 @@
 #include <memory>
 #include <iostream>
 #include <cstring>
-
+#include "db.hpp"
 #define SENDBUF_SIZE 1024
 #define MAXFDS 10000
 
@@ -59,11 +59,11 @@ public:
     void run();
 
 private:
-    //const int MAXFDS = 10000;
     int m_listener_socketfd;
     int m_epoll_fd;
     std::unique_ptr<epoll_event[]> m_Events;
     std::unique_ptr<Action[]> m_Actions;
+    Db db;
 
 private:
     void newConnection();

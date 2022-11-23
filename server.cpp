@@ -1,6 +1,7 @@
 #include "server.hpp"
 
 Server::Server(int portnum)
+        :db("10.89.60.33", "root", "cvscvs", "NhatAnh_Project")
 {
 
     if (-1 == portnum) {
@@ -31,10 +32,10 @@ Server::Server(int portnum)
     if (!m_Events) {
         perror_die("Unable to allocate memory for epoll_events");
     }
+
 }
 
-Server::~Server()
-{
+Server::~Server() {
     return;
 }
 
@@ -99,8 +100,11 @@ void read(Action* action) {
 
     uint8_t buf[1024];
     auto nbytes = recv(action->getFd(), buf, sizeof(buf), 0);
-    if (0 == nbytes) {
-        std::cout << "Close sockfd" << "\n";
+    std::cout << "nbytes: " << nbytes << "\n";
+    if (nbytes <= 0) {
+        std::cout << "Closing\n";
+        action->setIOEventType(Action::IOEvent_Type::IO_EVENT_NO_RW);
+        return;
     }
 
     std::cout << "Received message: " << buf << "\n";
@@ -110,8 +114,8 @@ void read(Action* action) {
 
 void write(Action* action) {
 
-    std::string buff("Default message");
-    auto nbytes = send(action->getFd(), buff.c_str(), 15, 0);
+    std::string buff("Default message\nhahaha\nhehehe");
+    auto nbytes = send(action->getFd(), buff.c_str(), 32, 0);
 
     if(-1 == nbytes) {
         std::cout << "Error sending message" << "\n";
@@ -132,7 +136,7 @@ void Server::waitEvents() {
     }
     std::cout << "eventsCount : " << eventsCount << std::endl;
     for(int i = 0; i < eventsCount; i++) {
-
+        std::cout << "asdfafd" << "\n";
         if (Events[i].data.ptr == this) {
             newConnection();
             continue;
@@ -156,6 +160,7 @@ void Server::waitEvents() {
                 break;
 
             case Action::IOEvent_Type::IO_EVENT_NO_RW:
+                std::cout << "No read write" << "\n";
                 close(action->getFd());
                 setIOEvent(action, EPOLL_CTL_DEL);
                 break;
