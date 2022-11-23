@@ -18,55 +18,38 @@
 #define SENDBUF_SIZE 1024
 #define MAXFDS 10000
 
-class Action {
-public:
-    Action() = default;
-    ~Action() = default;
+typedef enum {
+    IO_READ = 0,
+    IO_WRITE,
+    IO_NO_READ_WRITE
+} IOEvent;
 
-    enum IOEvent_Type: int {
-        IO_EVENT_R = 1,
-        IO_EVENT_W,
-        IO_EVENT_RW,
-        IO_EVENT_NO_RW
-    };
-
-    void setIOEventType(IOEvent_Type ioEvent) {
-        ioEventType = ioEvent;
-        return;
-    }
-
-    IOEvent_Type getIOEventType() {
-        return ioEventType;
-    }
-
-    void setFd(int sockfd) {
-        fd = sockfd;
-    }
-
-    int getFd() {
-        return fd;
-    }
-
-private:
-    IOEvent_Type ioEventType = IO_EVENT_R;
+typedef struct {
+    IOEvent event;
+    std::string buff;
     int fd;
-};
+
+    void reset() {
+        event = IOEvent::IO_READ;
+        buff = "";
+        fd = -1;
+    }
+} ConnectionState;
 
 class Server {
-public:
-    Server(int portnum);
-    ~Server();
-    void run();
-
 private:
-    int m_listener_socketfd;
-    int m_epoll_fd;
+    int m_ListenSocket;
+    int m_EpollFd;
     std::unique_ptr<epoll_event[]> m_Events;
-    std::unique_ptr<Action[]> m_Actions;
+    std::unique_ptr<ConnectionState[]> m_ConnectionStates;
     Db db;
 
 private:
-    void newConnection();
-    void waitEvents();
-    void setIOEvent(Action* action, int operation);
+    void WaitEvents();
+    void SetIOEvent(ConnectionState* connection_state, int operation);
+
+public:
+    Server(int portnum);
+    ~Server();
+    void Run();
 };

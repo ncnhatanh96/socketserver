@@ -28,6 +28,7 @@ void report_peer_connected(const struct sockaddr_in* sa, socklen_t salen) {
     printf("peer (unknonwn) connected\n");
   }
 }
+
 void perror_die(const std::string& msg) {
   perror(msg.c_str());
   exit(EXIT_FAILURE);
