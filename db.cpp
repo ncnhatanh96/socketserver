@@ -120,7 +120,6 @@ void Db::addCategory(int id, std::string new_name) {
 
     std::cout << "queries: " << queries << "\n";
     query(queries);
-
     return;
 }
 

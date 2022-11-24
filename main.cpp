@@ -1,11 +1,11 @@
-//#include "server.hpp"
+#include "server.hpp"
 #include "db.hpp"
 
 int main() {
-    //Server server(9090);
+    Server server(9090);
 
-    //server.run();
-    Db db("10.89.60.33", "root", "cvscvs", "NhatAnh_Project");
+    server.Run();
+    //Db db("10.89.60.33", "root", "cvscvs", "NhatAnh_Project");
 
     //db.getCategory(2);
     //db.getCategory("Soda");
@@ -15,7 +15,7 @@ int main() {
     //db.deleteCategory("Auto");
     //db.deleteCategory(9);
     //db.deleteCategory(10);
-    std::string ref = db.getProduct(2);
+    //std::string ref = db.getProduct(2);
 
     //db.getProductOfCategory("Soda");
 

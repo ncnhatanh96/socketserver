@@ -14,9 +14,21 @@
 #include <memory>
 #include <iostream>
 #include <cstring>
+#include <thread>
+#include <vector>
 #include "db.hpp"
-#define SENDBUF_SIZE 1024
+
 #define MAXFDS 10000
+#define MAX_BUF_LENGTH 1024
+
+typedef enum {
+    AddCategory = 0,
+    AddProduct,
+    GetCategory,
+    GetProduct,
+    RemoveCategory,
+    RemoveProduct
+} Action;
 
 typedef enum {
     IO_READ = 0,
@@ -42,11 +54,13 @@ private:
     int m_EpollFd;
     std::unique_ptr<epoll_event[]> m_Events;
     std::unique_ptr<ConnectionState[]> m_ConnectionStates;
-    Db db;
 
 private:
-    void WaitEvents();
+    void WaitEvents(std::shared_ptr<Db> db);
     void SetIOEvent(ConnectionState* connection_state, int operation);
+    void Read(std::shared_ptr<Db> db, ConnectionState* p_ConnectionState);
+    void Write(ConnectionState* p_ConnectionState);
+    void Parser(std::string request);
 
 public:
     Server(int portnum);
