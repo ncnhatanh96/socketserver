@@ -1,24 +1,7 @@
 #include "util.hpp"
-#define N_BACKLOG 64
+#define N_BACKLOG 84
 
-void die(const std::string& fmt, ...) {
-  va_list args;
-  va_start(args, fmt);
-  vfprintf(stderr, fmt.c_str(), args);
-  va_end(args);
-  fprintf(stderr, "\n");
-  exit(EXIT_FAILURE);
-}
-
-void* xmalloc(size_t size) {
-  void* ptr = malloc(size);
-  if (!ptr) {
-    die("malloc failed");
-  }
-  return ptr;
-}
-
-void report_peer_connected(const struct sockaddr_in* sa, socklen_t salen) {
+void ReportClientConnection(const struct sockaddr_in* sa, socklen_t salen) {
   char hostbuf[NI_MAXHOST];
   char portbuf[NI_MAXSERV];
   if (getnameinfo((struct sockaddr*)sa, salen, hostbuf, NI_MAXHOST, portbuf,
@@ -34,7 +17,7 @@ void perror_die(const std::string& msg) {
   exit(EXIT_FAILURE);
 }
 
-int listen_inet_socket(int portnum) {
+int Start_ListenSocket(int portnum) {
   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
   if (sockfd < 0) {
     perror_die("ERROR opening socket");
@@ -64,7 +47,7 @@ int listen_inet_socket(int portnum) {
   return sockfd;
 }
 
-void make_socket_non_blocking(int sockfd) {
+void Set_NONBlocking_Socket(int sockfd) {
   int flags = fcntl(sockfd, F_GETFL, 0);
   if (flags == -1) {
     perror_die("fcntl F_GETFL");

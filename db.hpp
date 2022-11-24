@@ -23,10 +23,9 @@ private:
     std::string user;
     std::string password;
     std::string database;
+	MYSQL* conn = NULL;
 
 private:
-    MYSQL* connect();
-    void close(MYSQL* conn);
     MYSQL_RES* query(std::string queries);
     void dumpSQLQuery(MYSQL_RES* res);
     std::string toString(MYSQL_RES* res);
@@ -47,6 +46,8 @@ public:
     void addCategory(int id, std::string new_name);
     void addProduct(int id, std::string name, float price,
                     std::string desc, int category_id);
+    void addProduct(int id, std::string name, float price,
+                    std::string desc, std::string category_name);
 
     void deleteCategory(std::string category);
     void deleteCategory(int id);

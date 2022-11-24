@@ -33,7 +33,8 @@ typedef enum {
 typedef enum {
     IO_READ = 0,
     IO_WRITE,
-    IO_NO_READ_WRITE
+    IO_NO_READ_WRITE,
+    IO_CLOSED
 } IOEvent;
 
 typedef struct {
@@ -42,8 +43,8 @@ typedef struct {
     int fd;
 
     void reset() {
-        event = IOEvent::IO_READ;
-        buff = "";
+        event = IOEvent::IO_CLOSED;
+        buff.clear();
         fd = -1;
     }
 } ConnectionState;
@@ -52,18 +53,20 @@ class Server {
 private:
     int m_ListenSocket;
     int m_EpollFd;
+    int m_Threads;
     std::unique_ptr<epoll_event[]> m_Events;
     std::unique_ptr<ConnectionState[]> m_ConnectionStates;
 
 private:
-    void WaitEvents(std::shared_ptr<Db> db);
+    void WaitIOEvents(std::shared_ptr<Db> db);
     void SetIOEvent(ConnectionState* connection_state, int operation);
     void Read(std::shared_ptr<Db> db, ConnectionState* p_ConnectionState);
     void Write(ConnectionState* p_ConnectionState);
-    void Parser(std::string request);
+    void Handler(std::shared_ptr<Db> db, std::string request, 
+            ConnectionState* p_ConnectionState);
 
 public:
-    Server(int portnum);
+    Server(int portnum, int threads = 2);
     ~Server();
     void Run();
 };

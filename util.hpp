@@ -12,12 +12,7 @@
 #endif
 #include <netdb.h>
 
-int listen_inet_socket(int portnum);
-void make_socket_non_blocking(int sockfd);
+int Start_ListenSocket(int portnum);
+void Set_NONBlocking_Socket(int sockfd);
 void perror_die(const std::string& msg);
-// Dies (exits with a failure status) after printing the given printf-like
-// message to stdout.
-void die(const std::string& fmt, ...);
-// Wraps malloc with error checking: dies if malloc fails.
-void* xmalloc(size_t size);
-void report_peer_connected(const struct sockaddr_in* sa, socklen_t salen);
+void ReportClientConnection(const struct sockaddr_in* sa, socklen_t salen);

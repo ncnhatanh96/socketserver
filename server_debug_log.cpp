@@ -2,11 +2,10 @@
 
 Server::Server(int portnum, int threads):m_Threads(threads)
 {
-    std::cout << "Initializing server...\n";
     if (-1 == portnum) {
         return;
     }
-    m_ListenSocket = Start_ListenSocket(portnum);
+    m_ListenSocket = listen_inet_socket(portnum);
 
     m_EpollFd = epoll_create1(0);
     if (m_EpollFd < 0) {
@@ -52,31 +51,25 @@ void Server::SetIOEvent(ConnectionState* connection_state, int operation) {
         case IOEvent::IO_NO_READ_WRITE:
             break;
 
-        case IOEvent::IO_CLOSED:
-            return;
-
         default:
             perror_die("Unknown action");
     }
 
     int res = 0;
     if (EPOLL_CTL_DEL == operation) {
-        std::cout << "Close socket...\n";
         res = epoll_ctl(m_EpollFd, operation, connection_state->fd, nullptr);
-        close(connection_state->fd);
         connection_state->reset();
     }
     else
         res = epoll_ctl(m_EpollFd, operation, connection_state->fd, &event);
 
     if (-1 == res) {
-        std::cout << "Ignore socket error...\n";
+        perror_die("epoll_ctl error");
     }
     return;
 }
 
 void Server::Handler(std::shared_ptr<Db> db, std::string request, ConnectionState* p_ConnectionState) {
-    std::cout << "Handling request from client...\n";
     std::string action(1, request[0]);
     char Product[32]{};
     char Category[32]{};
@@ -88,7 +81,9 @@ void Server::Handler(std::shared_ptr<Db> db, std::string request, ConnectionStat
 
         case Action::AddCategory:
             sscanf(request.c_str(), "%*d_%d_%[^_]_%d_", &CategoryID, Category, &ParentID);
-
+            std::cout << "CategoryID: " << CategoryID
+                    << " Category: " << Category
+                    << " ParentID: " << ParentID << "\n";
             if (-1 == ParentID)
                 db->addCategory(CategoryID, Category);
             else
@@ -96,14 +91,21 @@ void Server::Handler(std::shared_ptr<Db> db, std::string request, ConnectionStat
             break;
 
         case Action::AddProduct:
-            sscanf(request.c_str(), "%*d_%d_%[^_]_%f_%[^_]_%[^_]", &ID, Product, &Price, Desc, Category);
-            db->addProduct(ID, Product, Price, Desc, Category);
+            sscanf(request.c_str(), "%*d_%d_%[^_]_%f_%[^_]_%d", &ID, Product, &Price, Desc, &CategoryID);
+            std::cout << "ID: " << ID
+                    << " Product: " << Product
+                    << " Price: " << Price
+                    << " Desc: " << Desc
+                    << " CateID: " << CategoryID << "\n";
+            db->addProduct(ID, Product, Price, Desc, CategoryID);
             break;
 
         case Action::GetCategory:
             sscanf(request.c_str(), "%*d_%[^_]_", Category);
-            std::cout << "Category: " << Category << "\n";
             p_ConnectionState->buff = db->getCategory(Category);
+            std::cout << "Buff: " << p_ConnectionState->buff << "\n";
+            std::cout << "Fd: " << p_ConnectionState->fd << "\n";
+
             break;
 
         case Action::GetProduct:
@@ -120,7 +122,9 @@ void Server::Handler(std::shared_ptr<Db> db, std::string request, ConnectionStat
             sscanf(request.c_str(), "%*d_%[^_]_", Product);
             db->deleteProduct(Product);
             break;
+            break;
         default:
+            std::cout << "Unknown request from client\n";
             break;
     }
     return;
@@ -131,10 +135,16 @@ void Server::Read(std::shared_ptr<Db> db, ConnectionState* p_ConnectionState) {
     std::string receive;
 
     auto bytes = recv(p_ConnectionState->fd, &buffer[0], buffer.size(), 0);
-    if (bytes <= 0) {
+
+    if (0 == bytes) {
         p_ConnectionState->event = IO_NO_READ_WRITE;
         SetIOEvent(p_ConnectionState, EPOLL_CTL_DEL);
-        return;
+    } else if (bytes < 0) {
+        if (EAGAIN == errno || EWOULDBLOCK == errno) {
+            return;
+        } else {
+            perror_die("Receive error");
+        }
     }
     receive.append(buffer.cbegin(), buffer.cend());
     Handler(db, receive, p_ConnectionState);
@@ -145,27 +155,62 @@ void Server::Read(std::shared_ptr<Db> db, ConnectionState* p_ConnectionState) {
 void Server::Write(ConnectionState* p_ConnectionState) {
 
     if (!p_ConnectionState) {
-        perror_die("Write: nullptr");
+        std::cout << "Access NULLPtr\n";
+        return;
     }
-
-    const char* buff_ptr = p_ConnectionState->buff.data();
-    std::size_t buff_size = p_ConnectionState->buff.length();
-    int bytes = 0;
-    while (buff_size > bytes) {
-        auto bytes = send(p_ConnectionState->fd, p_ConnectionState->buff.data(),
-                            p_ConnectionState->buff.length(), 0);
-        if (-1 == bytes) {
-            if (EAGAIN == errno || errno == EWOULDBLOCK)
-                return;
-            else
-                perror_die("Send error");
-        }
-
-        buff_ptr += bytes;
-        buff_size -= bytes;
+    std::cout << "Sending..." << "\n";
+    std::cout << "Buff: " << p_ConnectionState->buff <<  "\n";
+    std::cout << "Fd: " << p_ConnectionState->fd << "\n";
+    auto bytes = send(p_ConnectionState->fd,
+            p_ConnectionState->buff.data(), p_ConnectionState->buff.length(), 0);
+    if (bytes < p_ConnectionState->buff.length()) {
+        std::cout << "Write error\n" << "\n";
     }
+    std::cout << "Done\n" << "\n";
     p_ConnectionState->buff.clear();
     p_ConnectionState->event = IO_READ;
+    return;
+}
+
+void Server::WaitIOEvents(std::shared_ptr<Db> db) {
+
+    std::cout << "WaitIOEvents...." << "\n";
+    while(true) {
+        struct epoll_event* Events = (struct epoll_event*)m_Events.get();
+        auto eventsCount = epoll_wait(m_EpollFd, Events, MAXFDS, -1);
+
+        if((eventsCount < 0 ) && errno != EINTR) {
+            perror_die("epoll_wait error");
+        }
+
+        for (int i = 0; i < eventsCount; i++) {
+            if (Events[i].data.ptr == this) {
+                continue;
+            }
+
+            void* dataPtr = Events[i].data.ptr;
+            ConnectionState* p_ConnectionState = (ConnectionState *) dataPtr;
+
+            switch(p_ConnectionState->event) {
+
+                case IOEvent::IO_READ:
+                    std::cout << "Reading..." << "\n";
+                    Read(db, p_ConnectionState);
+                    SetIOEvent(p_ConnectionState, EPOLL_CTL_MOD);
+                    break;
+
+                case IOEvent::IO_WRITE:
+                    std::cout << "Writing..." << "\n";
+                    Write(p_ConnectionState);
+                    SetIOEvent(p_ConnectionState, EPOLL_CTL_MOD);
+                    break;
+
+                default:
+                    perror_die("Error handling fd");
+                    break;
+            }
+        }
+    }
     return;
 }
 
@@ -188,54 +233,11 @@ void Server::Run()
         } else if (newsockfd >= MAXFDS) {
             perror_die("sockfd greater than MAXFDS");
         }
-        std::cout << "Accept new connection...\n";
-        ReportClientConnection(&client_addr, client_addr_len);
-        Set_NONBlocking_Socket(newsockfd);
 
+        make_socket_non_blocking(newsockfd);
         m_ConnectionStates[newsockfd].reset();
         m_ConnectionStates[newsockfd].fd = newsockfd;
-        m_ConnectionStates[newsockfd].event = IOEvent::IO_READ;
         SetIOEvent(&m_ConnectionStates[newsockfd], EPOLL_CTL_ADD);
     }
     return;
 }
-
-void Server::WaitIOEvents(std::shared_ptr<Db> db) {
-    std::cout << "Polling thread is running...\n";
-    while(true) {
-        struct epoll_event* Events = (struct epoll_event*)m_Events.get();
-        auto eventsCount = epoll_wait(m_EpollFd, Events, MAXFDS, -1);
-
-        if((eventsCount < 0 ) && errno != EINTR) {
-            perror_die("epoll_wait error");
-        }
-
-        for (int i = 0; i < eventsCount; i++) {
-            if (Events[i].data.ptr == this) {
-                continue;
-            }
-
-            void* dataPtr = Events[i].data.ptr;
-            ConnectionState* p_ConnectionState = (ConnectionState *) dataPtr;
-
-            switch(p_ConnectionState->event) {
-
-                case IOEvent::IO_READ:
-                    Read(db, p_ConnectionState);
-                    SetIOEvent(p_ConnectionState, EPOLL_CTL_MOD);
-                    break;
-
-                case IOEvent::IO_WRITE:
-                    Write(p_ConnectionState);
-                    SetIOEvent(p_ConnectionState, EPOLL_CTL_MOD);
-                    break;
-
-                default:
-                    perror_die("Error handling fd");
-                    break;
-            }
-        }
-    }
-    return;
-}
-
